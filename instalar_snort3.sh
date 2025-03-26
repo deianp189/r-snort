@@ -45,23 +45,37 @@ mkdir -p $INSTALL_DIR/{bin,etc/snort,lib,include,share,logs,rules}
 # Etapa 1: Instalación de dependencias
 log "Instalando dependencias del sistema..."
 apt-get update
-apt-get install -y build-essential cmake libtool libpcap-dev libpcre3-dev     libdumbnet-dev bison flex zlib1g-dev pkg-config libhwloc-dev     liblzma-dev libssl-dev git wget curl
+apt-get install -y build-essential cmake libtool libpcap-dev libpcre3-dev     \
+                   libdumbnet-dev bison flex zlib1g-dev pkg-config libhwloc-dev \
+                   liblzma-dev libssl-dev git wget curl
 
-# Etapa 2: Descompresión e instalación de cada componente
+# Esta función se ha modificado para encontrar
+# la carpeta extraída real y no fiarse del nombre del fichero .tar.
 instalar_paquete() {
     local archivo=$1
-    local nombre=$(basename "$archivo" | cut -d'.' -f1)
-    log "Instalando $nombre..."
+    log "Instalando $(basename "$archivo")..."
+
+    # Descomprimir
     tar -xf "$archivo"
-    cd "$nombre"*
+    
+    # Detectar carpeta resultante de la descompresión
+    local dir
+    dir="$(tar -tf "$archivo" | head -1 | cut -d/ -f1)"
+    
+    cd "$dir"
+
+    # Intentar compilar con configure (si existe configure) o con cmake
     ./configure --prefix=/usr --enable-shared || cmake . -DCMAKE_INSTALL_PREFIX=/usr
     make -j"$(nproc)"
     make install
+
+    # Volver atrás y limpiar
     cd ..
-    rm -rf "$nombre"*
-    success "$nombre instalado correctamente."
+    rm -rf "$dir"
+    success "$(basename "$archivo") instalado correctamente."
 }
 
+# Etapa 2: Descompresión e instalación de cada componente
 cd "$SOFTWARE_DIR"
 for f in *.tar.gz *.tar.xz; do
     instalar_paquete "$f"
@@ -85,12 +99,10 @@ cp "$CONFIG_DIR/snort.lua" "$INSTALL_DIR/etc/snort/"
 cp "$CONFIG_DIR/custom.rules" "$INSTALL_DIR/etc/snort/"
 cp "$CONFIG_DIR/blocklist.rules.txt" "$INSTALL_DIR/etc/snort/"
 
-# Adaptar snort.service con la interfaz seleccionada
 log "Configurando snort.service para interfaz $IFACE..."
 cp "$CONFIG_DIR/snort.service" /etc/systemd/system/snort.service
 sed -i "s/-i eth0/-i $IFACE/" /etc/systemd/system/snort.service
 
-# Habilitar el servicio
 systemctl daemon-reexec
 systemctl daemon-reload
 systemctl enable snort.service
