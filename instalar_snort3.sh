@@ -108,9 +108,7 @@ if [[ "$START_AT" == "todo" ]]; then
       uuid-dev \
       libunwind-dev \
       libsafec-dev \
-      w3m \
-      ragel \
-      libboost-dev || log "Algunos paquetes opcionales no se encontraron en esta arquitectura. Continuando..."
+      w3m || log "Algunos paquetes opcionales no se encontraron en esta arquitectura. Continuando..."
 fi
 
 # Función para instalar paquetes individuales
@@ -172,7 +170,11 @@ if [[ "$START_AT" =~ ^(todo|paquetes|pcre2|luajit|snort3)$ ]]; then
     cd "$(find . -maxdepth 1 -type d -name 'snort3*' | head -n 1)"
 
     # Parche del bug en configure_cmake.sh
-    sed -i 's/\[ \"$NUMTHREADS\" -lt \"$MINTHREADS\" \]/[ \"${NUMTHREADS:-0}\" -lt \"${MINTHREADS:-1}\" ]/' configure_cmake.sh
+    sed -i 's/\[ \"$NUMTHREADS\" -lt \"$MINTHREADS\" \]/[ "${NUMTHREADS:-0}" -lt "${MINTHREADS:-1}" ]/' configure_cmake.sh
+
+    # Forzamos inclusión de libnuma
+    export CXXFLAGS="-I/usr/include"
+    export LDFLAGS="-lnuma"
 
     ./configure_cmake.sh --prefix="$INSTALL_DIR"
     cd build
