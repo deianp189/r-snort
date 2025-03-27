@@ -21,6 +21,20 @@ error() {
     exit 1
 }
 
+activar_swap_temporal_si_necesario() {
+    if free | awk '/^Swap:/ {exit !$2}'; then
+        log "Swap ya está activo."
+    else
+        log "No hay swap activa. Creando archivo de swap temporal (2GB)..."
+        falloc_file="/swapfile_snort"
+        fallocate -l 2G "$falloc_file" || dd if=/dev/zero of="$falloc_file" bs=1M count=2048
+        chmod 600 "$falloc_file"
+        mkswap "$falloc_file"
+        swapon "$falloc_file"
+        log "Swap temporal activada en $falloc_file"
+    fi
+}
+
 # Etapa 0: Comprobaciones previas
 echo "DEBUG: Iniciando script y comprobando usuario..."
 if [ "$(id -u)" -ne 0 ]; then
@@ -37,11 +51,6 @@ CONFIG_DIR="$(pwd)/configuracion"
 SOFTWARE_DIR="$(pwd)/software"
 INSTALL_DIR="/usr/local/snort"
 LOG_FILE="/var/log/snort_install.log"
-
-echo "DEBUG: CONFIG_DIR=$CONFIG_DIR"
-echo "DEBUG: SOFTWARE_DIR=$SOFTWARE_DIR"
-echo "DEBUG: INSTALL_DIR=$INSTALL_DIR"
-echo "DEBUG: LOG_FILE=$LOG_FILE"
 
 # Menú de selección para ejecutar solo una parte del script
 echo
@@ -64,8 +73,6 @@ select START_POINT in \
     esac
 done
 
-echo "DEBUG: Has seleccionado: $START_AT"
-
 # Redirigimos salida y errores al archivo de log
 exec > >(tee -a "$LOG_FILE") 2>&1
 
@@ -82,6 +89,7 @@ if [[ "$START_AT" == "todo" ]]; then
       libtool \
       libpcap-dev \
       libpcre3-dev \
+      libpcre2-dev \
       libdumbnet-dev \
       bison \
       flex \
@@ -96,160 +104,103 @@ if [[ "$START_AT" == "todo" ]]; then
       autoconf \
       automake \
       check \
-      libnuma-dev
+      libnuma-dev \
+      uuid-dev \
+      libunwind-dev \
+      libsafec-dev \
+      w3m || log "Algunos paquetes opcionales no se encontraron en esta arquitectura. Continuando..."
 fi
 
-# Función para instalar cada paquete (DAQ, libdnet, etc.)
+# Función para instalar paquetes individuales
 instalar_paquete() {
     local archivo="$1"
     log "Instalando $(basename "$archivo")..."
-    echo "DEBUG: Empezando función instalar_paquete con '$archivo'"
-
-    echo "DEBUG: Descomprimiendo '$archivo' en $(pwd)"
     tar -xf "$archivo"
-    echo "DEBUG: Completada la descompresión de '$archivo'"
-
-    echo "DEBUG: Voy a listar el contenido de $archivo con 'tar -tf':"
-    tar -tf "$archivo" || echo "DEBUG: 'tar -tf' devolvió error $?"
-    set +e
-    echo "DEBUG: Voy a capturar la primera línea con head/cut:"
-    local dir
-    dir="$(tar -tf "$archivo" | head -1 | cut -d/ -f1)"
-    echo "DEBUG: Directorio detectado tras descompresión: '$dir'"
-    set -e
-
+    local dir="$(tar -tf "$archivo" | head -1 | cut -d/ -f1)"
     cd "$dir"
-    echo "DEBUG: Ahora en $(pwd)"
 
     case "$archivo" in
     *luajit*)
-        echo "DEBUG: Instalación especial para LuaJIT"
         make -j"$(nproc)"
         make install PREFIX=/usr
-        cd ..
-        rm -rf "$dir"
+        cd .. && rm -rf "$dir"
         success "LuaJIT instalado correctamente."
-        return
-        ;;
+        return ;;
     *openssl*)
-        echo "DEBUG: Instalación especial para OpenSSL"
-        arch=$(uname -m)
-        if [[ "$arch" == "aarch64" ]]; then
-            target="linux-aarch64"
-        else
-            target="linux-generic32"
-        fi
+        local target=$(uname -m | grep -q aarch64 && echo "linux-aarch64" || echo "linux-generic32")
         ./Configure --prefix=/usr --openssldir=/etc/ssl "$target"
-
         make -j"$(nproc)"
         make install
-        cd ..
-        rm -rf "$dir"
+        cd .. && rm -rf "$dir"
         success "OpenSSL instalado correctamente."
-        return
-        ;;
+        return ;;
     esac
 
-
-
-    # 3. Si tenemos configure.ac y no existe configure,
-    #    generamos configure con bootstrap/autoreconf
     if [[ -f "configure.ac" && ! -f "configure" ]]; then
-        echo "DEBUG: Se encontró configure.ac pero no configure. Intentando generar configure..."
-        if [[ -f "bootstrap" ]]; then
-            echo "DEBUG: bootstrap encontrado. Otorgando permiso de ejecución..."
-            chmod +x bootstrap
-            echo "DEBUG: Ejecutando ./bootstrap..."
-            ./bootstrap
-            echo "DEBUG: Finalizó bootstrap"
-        else
-            echo "DEBUG: No existe bootstrap, probando autoreconf -fi..."
-            autoreconf -fi
-            echo "DEBUG: Finalizado autoreconf"
-        fi
-    else
-        echo "DEBUG: No hace falta bootstrap/autoreconf. O ya existe configure o no hay configure.ac."
+        [[ -f "bootstrap" ]] && chmod +x bootstrap && ./bootstrap || autoreconf -fi
     fi
 
-    # 4. Ahora comprobamos si se ha generado configure
     if [[ -f "configure" ]]; then
-        echo "DEBUG: 'configure' existe, lanzando ./configure --prefix=/usr --enable-shared"
         ./configure --prefix=/usr --enable-shared
-        echo "DEBUG: Finalizó ./configure"
-
-        echo "DEBUG: Ejecutando make -j$(nproc)"
-        make -j"$(nproc)"
-        echo "DEBUG: Finalizó make"
-
-        echo "DEBUG: Ejecutando make install"
-        make install
-        echo "DEBUG: Finalizó make install"
     else
-        echo "DEBUG: 'configure' NO existe, intentamos CMake..."
         cmake . -DCMAKE_INSTALL_PREFIX=/usr
-        echo "DEBUG: Finalizó cmake"
-
-        echo "DEBUG: Ejecutando make -j$(nproc)"
-        make -j"$(nproc)"
-        echo "DEBUG: Finalizó make"
-
-        echo "DEBUG: Ejecutando make install"
-        make install
-        echo "DEBUG: Finalizó make install"
     fi
 
-    # 6. Volvemos al directorio software y limpiamos
-    echo "DEBUG: Limpiando carpeta extraída. Saliendo de $(pwd)"
-    cd ..
-    rm -rf "$dir"
+    make -j"$(nproc)"
+    make install
+    cd .. && rm -rf "$dir"
     success "$(basename "$archivo") instalado correctamente."
-    echo "DEBUG: Terminada función instalar_paquete para '$archivo'"
 }
 
-# Etapa 2: Descompresión e instalación de cada componente
-if [[ "$START_AT" == "todo" || "$START_AT" == "paquetes" || "$START_AT" == "pcre2" || "$START_AT" == "luajit" ]]; then
+# Etapa 2: Instalación de paquetes comprimidos
+if [[ "$START_AT" =~ ^(todo|paquetes|pcre2|luajit)$ ]]; then
     cd "$SOFTWARE_DIR"
-    echo "DEBUG: Iniciando bucle de instalación de cada paquete en $(pwd)"
-    SKIP=0
     for f in *.tar.gz *.tar.xz; do
-        if [[ "$START_AT" == "pcre2" && "$SKIP" -eq 0 && "$f" != *pcre2* ]]; then
-            continue
-        fi
-        if [[ "$START_AT" == "luajit" && "$SKIP" -eq 0 && "$f" != *luajit* ]]; then
-            continue
-        fi
-        SKIP=1
-        echo "DEBUG: Llamando a instalar_paquete con '$f'"
+        if [[ "$START_AT" == "pcre2" && "$f" != *pcre2* ]]; then continue; fi
+        if [[ "$START_AT" == "luajit" && "$f" != *luajit* ]]; then continue; fi
         instalar_paquete "$f"
-        echo "DEBUG: Finalizado instalar_paquete para '$f'"
     done
 fi
 
-# Etapa 3: Instalación de Snort
-if [[ "$START_AT" == "todo" || "$START_AT" == "paquetes" || "$START_AT" == "pcre2" || "$START_AT" == "luajit" || "$START_AT" == "snort3" ]]; then
+# Etapa 3: Instalación de Snort 3
+if [[ "$START_AT" =~ ^(todo|paquetes|pcre2|luajit|snort3)$ ]]; then
     log "Instalando Snort 3..."
-    echo "DEBUG: Vamos a extraer 'snort3.tar.gz'"
     cd "$SOFTWARE_DIR"
     tar -xzf snort3.tar.gz
-    echo "DEBUG: Hecho tar -xzf snort3.tar.gz"
+    cd "$(find . -maxdepth 1 -type d -name 'snort3*' | head -n 1)"
 
-    echo "DEBUG: Buscando carpeta snort3*..."
-    cd snort3*
-    echo "DEBUG: Ahora en $(pwd), lanzamos ./configure_cmake.sh --prefix=$INSTALL_DIR"
+    # Parche del bug en configure_cmake.sh
+    sed -i 's/\[ \"$NUMTHREADS\" -lt \"$MINTHREADS\" \]/[ "${NUMTHREADS:-0}" -lt "${MINTHREADS:-1}" ]/' configure_cmake.sh
+
     ./configure_cmake.sh --prefix="$INSTALL_DIR"
-    echo "DEBUG: Finalizado configure_cmake.sh, ahora cd build..."
-
     cd build
-    echo "DEBUG: En $(pwd), lanzamos make -j$(nproc)"
-    make -j"$(nproc)"
-    echo "DEBUG: Finalizó make, lanzamos make install"
+
+    activar_swap_temporal_si_necesario
+
+    log "Compilando con protección contra OOM..."
+    nproc_safe=$(nproc)
+    mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+    if [ "$mem_kb" -lt 1500000 ]; then
+        log "Memoria baja. Limitando compilación a un solo hilo."
+        nproc_safe=1
+    fi
+
+    make -j"$nproc_safe" || error "Fallo en make. Posible error de memoria insuficiente."
     make install
     ldconfig
     success "Snort 3 instalado correctamente."
 fi
 
+# Limpieza del swap temporal
+if swapon --show | grep -q "/swapfile_snort"; then
+    log "Desactivando swap temporal..."
+    swapoff /swapfile_snort
+    rm -f /swapfile_snort
+    success "Swap temporal eliminada."
+fi
+
 # Etapa 4: Configuración
-if [[ "$START_AT" == "todo" || "$START_AT" == "paquetes" || "$START_AT" == "pcre2" || "$START_AT" == "luajit" || "$START_AT" == "snort3" || "$START_AT" == "config" ]]; then
+if [[ "$START_AT" =~ ^(todo|paquetes|pcre2|luajit|snort3|config)$ ]]; then
     log "Copiando ficheros de configuración..."
     cp "$CONFIG_DIR/snort.lua" "$INSTALL_DIR/etc/snort/"
     cp "$CONFIG_DIR/custom.rules" "$INSTALL_DIR/etc/snort/"
@@ -257,7 +208,7 @@ if [[ "$START_AT" == "todo" || "$START_AT" == "paquetes" || "$START_AT" == "pcre
 
     log "Configurando snort.service para interfaz $IFACE..."
     cp "$CONFIG_DIR/snort.service" /etc/systemd/system/snort.service
-    sed -i "s/-i eth0/-i $IFACE/" /etc/systemd/system/snort.service
+    sed -i "s/-i eth[0-9]\+/-i $IFACE/" /etc/systemd/system/snort.service
 
     log "Descomprimiendo community rules..."
     mkdir -p "$INSTALL_DIR/etc/snort/rules"
@@ -269,7 +220,6 @@ if [[ "$START_AT" == "todo" || "$START_AT" == "paquetes" || "$START_AT" == "pcre
     systemctl enable snort.service
     systemctl restart snort.service
 
-    log "Esperando unos segundos para comprobar el estado del servicio..."
     sleep 3
     systemctl status snort.service --no-pager
 
