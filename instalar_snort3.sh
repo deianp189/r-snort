@@ -22,16 +22,21 @@ error() {
 }
 
 activar_swap_temporal_si_necesario() {
-    if free | awk '/^Swap:/ {exit !$2}'; then
-        log "Swap ya está activo."
+    local mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+    if [ "$mem_kb" -lt 1500000 ]; then
+        if free | awk '/^Swap:/ {exit !$2}'; then
+            log "Swap ya está activo."
+        else
+            log "Memoria insuficiente y sin swap. Creando archivo de swap temporal (2GB)..."
+            falloc_file="/swapfile_snort"
+            fallocate -l 2G "$falloc_file" || dd if=/dev/zero of="$falloc_file" bs=1M count=2048
+            chmod 600 "$falloc_file"
+            mkswap "$falloc_file"
+            swapon "$falloc_file"
+            log "Swap temporal activada en $falloc_file"
+        fi
     else
-        log "No hay swap activa. Creando archivo de swap temporal (2GB)..."
-        falloc_file="/swapfile_snort"
-        fallocate -l 2G "$falloc_file" || dd if=/dev/zero of="$falloc_file" bs=1M count=2048
-        chmod 600 "$falloc_file"
-        mkswap "$falloc_file"
-        swapon "$falloc_file"
-        log "Swap temporal activada en $falloc_file"
+        log "Memoria suficiente detectada. No se crea swap."
     fi
 }
 
@@ -169,12 +174,7 @@ if [[ "$START_AT" =~ ^(todo|paquetes|pcre2|luajit|snort3)$ ]]; then
     tar -xzf snort3.tar.gz
     cd "$(find . -maxdepth 1 -type d -name 'snort3*' | head -n 1)"
 
-    # Parche del bug en configure_cmake.sh
-    sed -i 's/\[ \"$NUMTHREADS\" -lt \"$MINTHREADS\" \]/[ "${NUMTHREADS:-0}" -lt "${MINTHREADS:-1}" ]/' configure_cmake.sh
-
-    # Forzamos inclusión de libnuma
-    export CXXFLAGS="-I/usr/include"
-    export LDFLAGS="-lnuma"
+    sed -i 's/\[ \"\$NUMTHREADS\" -lt \"\$MINTHREADS\" \]/[ \"${NUMTHREADS:-0}\" -lt \"${MINTHREADS:-1}\" ]/' configure_cmake.sh
 
     ./configure_cmake.sh --prefix="$INSTALL_DIR"
     cd build
@@ -191,6 +191,8 @@ if [[ "$START_AT" =~ ^(todo|paquetes|pcre2|luajit|snort3)$ ]]; then
 
     make -j"$nproc_safe" || error "Fallo en make. Posible error de memoria insuficiente."
     make install
+    log "Creando symlink para ejecutar Snort globalmente como 'snort'..."
+    ln -sf /usr/local/snort/bin/snort /usr/local/bin/snort
     ldconfig
     success "Snort 3 instalado correctamente."
 fi
@@ -208,15 +210,35 @@ if [[ "$START_AT" =~ ^(todo|paquetes|pcre2|luajit|snort3|config)$ ]]; then
     log "Copiando ficheros de configuración..."
     cp "$CONFIG_DIR/snort.lua" "$INSTALL_DIR/etc/snort/"
     cp "$CONFIG_DIR/custom.rules" "$INSTALL_DIR/etc/snort/"
-    cp "$CONFIG_DIR/blocklist.rules.txt" "$INSTALL_DIR/etc/snort/"
 
-    log "Configurando snort.service para interfaz $IFACE..."
-    cp "$CONFIG_DIR/snort.service" /etc/systemd/system/snort.service
-    sed -i "s/-i eth[0-9]\+/-i $IFACE/" /etc/systemd/system/snort.service
+    log "Asegurando directorios de reputation y community rules..."
+    mkdir -p "$INSTALL_DIR/etc/snort/reputation"
+    mkdir -p "$INSTALL_DIR/etc/snort/snort3-community-rules"
+    touch "$INSTALL_DIR/etc/snort/reputation/interface.info"
 
-    log "Descomprimiendo community rules..."
-    mkdir -p "$INSTALL_DIR/etc/snort/rules"
-    tar -xzf "$CONFIG_DIR/snort3-community-rules.tar.gz" -C "$INSTALL_DIR/etc/snort/rules" --strip-components=1
+    log "Descomprimiendo community rules en la ruta adecuada..."
+    tar -xzf "$CONFIG_DIR/snort3-community-rules.tar.gz" -C "$INSTALL_DIR/etc/snort/snort3-community-rules" --strip-components=1
+
+    log "Generando snort.service dinámicamente para interfaz $IFACE..."
+    cat > /etc/systemd/system/snort.service <<EOF
+[Unit]
+Description=Snort NIDS Daemon
+After=network.target
+
+[Service]
+ExecStart=$INSTALL_DIR/bin/snort -c $INSTALL_DIR/etc/snort/snort.lua -i $IFACE -A alert_fast
+ExecReload=/bin/kill -HUP \$MAINPID
+Restart=always
+User=root
+Group=root
+LimitCORE=infinity
+LimitNOFILE=65536
+LimitNPROC=65536
+PIDFile=/var/run/snort.pid
+
+[Install]
+WantedBy=multi-user.target
+EOF
 
     log "Reiniciando servicio snort..."
     systemctl daemon-reexec
