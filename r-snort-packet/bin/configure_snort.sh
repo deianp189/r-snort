@@ -1,6 +1,6 @@
 #!/bin/bash
 
-configurar_snort3() {
+configurar_snort() {
   local CONFIG_DIR="$1"
   local INSTALL_DIR="$2"
   local IFACE="$3"
@@ -24,7 +24,7 @@ After=network.target
 
 [Service]
 ExecStart=$INSTALL_DIR/bin/snort -c $INSTALL_DIR/etc/snort/snort.lua -i $IFACE -A alert_fast
-ExecReload=/bin/kill -HUP $MAINPID
+ExecReload=/bin/kill -HUP \${MAINPID}
 Restart=always
 User=root
 Group=root

@@ -1,5 +1,4 @@
 #!/bin/bash
-
 mostrar_estadisticas() {
   local IFACE="$1"
   local INSTALL_DIR="$2"
@@ -14,7 +13,8 @@ mostrar_estadisticas() {
   disk_usage=$(df -h / | awk 'NR==2 {print $3 " usados de " $2}')
   cpu_model=$(lscpu | grep "Model name" | sed 's/Model name:\s*//')
   cpu_cores=$(nproc)
-  snort_version=$(snort -V 2>/dev/null | head -n 1)
+  snort_version=$("$INSTALL_DIR/bin/snort" -V 2>/dev/null | grep -i "version" || echo "No encontrado")
+
 
   echo "──────────────────────────────────────────────────────"
   echo -e "💻 Hostname:           $(hostname)"
