@@ -154,6 +154,14 @@ success "Dependencias de sistema instaladas."
 ###############################################################################
 instalar_paquete() {
   local archivo="$1"
+
+  # Validar integridad antes de intentar descomprimir
+  if [[ "$archivo" == *.tar.gz ]]; then
+    gzip -t "$archivo" || error "Archivo corrupto (gzip): $archivo"
+  elif [[ "$archivo" == *.tar.xz ]]; then
+    xz -t "$archivo" || error "Archivo corrupto (xz): $archivo"
+  fi
+
   log "Instalando: $(basename "$archivo")"
   tar -xf "$archivo"
   local dir
@@ -266,8 +274,15 @@ log "Descomprimiendo community rules en la carpeta esperada..."
 tar -xzf "$CONFIG_DIR/snort3-community-rules.tar.gz" -C "$INSTALL_DIR/etc/snort/snort3-community-rules" --strip-components=1
 
 # Genera el servicio systemd dinámicamente
+# Backup si el servicio ya existe
+if [ -f /etc/systemd/system/snort.service ]; then
+  cp /etc/systemd/system/snort.service /etc/systemd/system/snort.service.bak
+  log "Backup del servicio original guardado en snort.service.bak"
+fi
+
 log "Creando servicio systemd para interfaz $IFACE"
 cat > /etc/systemd/system/snort.service <<EOF
+
 [Unit]
 Description=Snort NIDS Daemon
 After=network.target
@@ -296,4 +311,32 @@ sleep 2
 systemctl status snort.service --no-pager
 
 success "Snort 3 instalado y configurado completamente."
-echo -e "${GREEN}Snort 3 está en ejecución en la interfaz: ${IFACE}.${NC}"
+
+
+###############################################################################
+#                        📊 Estadísticas del sistema                         #
+###############################################################################
+echo
+log "Resumen del sistema tras la instalación:"
+uptime_str=$(uptime -p)
+total_ram=$(free -h | awk '/Mem:/ {print $2}')
+used_ram=$(free -h | awk '/Mem:/ {print $3}')
+swap_enabled=$(swapon --noheadings | wc -l)
+swap_used=$(free -h | awk '/Swap:/ {print $3 "/" $2}')
+disk_usage=$(df -h / | awk 'NR==2 {print $3 " usados de " $2}')
+cpu_model=$(lscpu | grep "Model name" | sed 's/Model name:\s*//')
+cpu_cores=$(nproc)
+snort_version=$(snort -V 2>/dev/null | head -n 1)
+
+echo "──────────────────────────────────────────────────────"
+echo -e "💻 Hostname:           $(hostname)"
+echo -e "⏱  Uptime:             $uptime_str"
+echo -e "🧠 RAM usada:          $used_ram / $total_ram"
+echo -e "💾 Swap activa:        $([ "$swap_enabled" -eq 0 ] && echo "No" || echo "Sí ($swap_used)")"
+echo -e "📂 Espacio raíz:       $disk_usage"
+echo -e "🧠 CPU:                $cpu_model ($cpu_cores núcleos)"
+echo -e "🐗 Snort versión:      ${snort_version:-No encontrado}"
+echo -e "🌐 Interfaz activa:    $IFACE"
+echo "──────────────────────────────────────────────────────"
+
+success "Snort 3 está en ejecución en la interfaz: $IFACE."
