@@ -1,6 +1,6 @@
 #!/bin/bash
 
-activar_swap_temporal_si_necesario() {
+temp_swap_if_necessary() {
   local mem_kb
   mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
 
@@ -28,7 +28,7 @@ activar_swap_temporal_si_necesario() {
   fi
 }
 
-limpiar_swap_temporal() {
+temp_swap_clean() {
   if swapon --show | grep -q "/swapfile_snort"; then
     log "Desactivando swap temporal..."
     if swapoff /swapfile_snort; then

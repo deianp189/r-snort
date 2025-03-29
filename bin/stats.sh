@@ -1,5 +1,6 @@
 #!/bin/bash
-mostrar_estadisticas() {
+
+show_stats() {
   local IFACE="$1"
   local INSTALL_DIR="$2"
 

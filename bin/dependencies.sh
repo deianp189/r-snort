@@ -1,6 +1,6 @@
 #!/bin/bash
 
-instalar_dependencias() {
+dependencies_install() {
   log "Instalando dependencias..."
   apt-get update
   apt-get install -y \

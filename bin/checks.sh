@@ -3,7 +3,7 @@ check_root() {
   [ "$(id -u)" -eq 0 ] || error "Este script debe ejecutarse como root."
 }
 
-seleccionar_interfaz() {
+interface_selection() {
   log "Detectando interfaces de red disponibles..."
   mapfile -t interfaces < <(ip -brief link | awk '{print $1}' | grep -v '^lo$')
 

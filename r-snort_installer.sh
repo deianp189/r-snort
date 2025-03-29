@@ -24,7 +24,7 @@ source ./bin/configure_snort.sh
 source ./bin/stats.sh
 
 # Verificación mínima
-type configurar_snort >/dev/null || { echo "La función configurar_snort no está disponible"; exit 1; }
+type snort_config >/dev/null || { echo "La función snort_config no está disponible"; exit 1; }
 
 # Comprobaciones iniciales
 check_root
@@ -32,26 +32,23 @@ ascii_banner
 log "Instalador R-SNORT iniciado"
 
 # Selección de interfaz
-seleccionar_interfaz
+interface_selection
 export IFACE
 
 # Crear estructura de directorios
 mkdir -p "$INSTALL_DIR"/{bin,etc/snort,lib,include,share,logs,rules}
 
-# Bandera NUMA desactivada (eliminado completamente)
-NUMA_FLAG=""
-
 ###############################################################################
 #                               Ejecución modular                             #
 ###############################################################################
 
-instalar_dependencias
-instalar_paquetes_software
-instalar_snort "$SOFTWARE_DIR" "$INSTALL_DIR" "$NUMA_FLAG"
-limpiar_swap_temporal
+dependencies_install
+software_package_install
+snort_install "$SOFTWARE_DIR" "$INSTALL_DIR"
+temp_swap_clean
 
 # Configuración final
-if configurar_snort "$CONFIG_DIR" "$INSTALL_DIR" "$IFACE"; then
+if snort_config "$CONFIG_DIR" "$INSTALL_DIR" "$IFACE"; then
   log "configurar_snort ejecutado correctamente."
 else
   error "configurar_snort falló."
@@ -67,7 +64,7 @@ fi
 
 # Estadísticas
 log "Llamando a mostrar_estadisticas con: $IFACE $INSTALL_DIR"
-if mostrar_estadisticas "$IFACE" "$INSTALL_DIR"; then
+if show_stats "$IFACE" "$INSTALL_DIR"; then
   log "mostrar_estadisticas ejecutado correctamente."
 else
   error "mostrar_estadisticas falló."

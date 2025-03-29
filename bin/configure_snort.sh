@@ -1,6 +1,6 @@
 #!/bin/bash
 
-configurar_snort() {
+snort_config() {
   local CONFIG_DIR="$1"
   local INSTALL_DIR="$2"
   local IFACE="$3"
