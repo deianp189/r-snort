@@ -14,8 +14,8 @@ show_stats() {
   disk_usage=$(df -h / | awk 'NR==2 {print $3 " usados de " $2}')
   cpu_model=$(lscpu | grep "Model name" | sed 's/Model name:\s*//')
   cpu_cores=$(nproc)
-  snort_version=$("$INSTALL_DIR/bin/snort" -V 2>/dev/null | grep -i "version" || echo "No encontrado")
-
+  snort_version=$("$INSTALL_DIR/bin/snort" -V 2>/dev/null | grep -i "Version" | awk '{print $3}' || echo "No encontrado")
+  clamav_version=$(clamscan -V 2>/dev/null | awk '{print $2}' || echo "No encontrado")
 
   echo "──────────────────────────────────────────────────────"
   echo -e "💻 Hostname:           $(hostname)"
@@ -25,6 +25,7 @@ show_stats() {
   echo -e "📂 Espacio raíz:       $disk_usage"
   echo -e "🧠 CPU:                $cpu_model ($cpu_cores núcleos)"
   echo -e "🐗 Snort versión:      ${snort_version:-No encontrado}"
+  echo -e "🛡️  ClamAV versión:     ${clamav_version:-No encontrado}"
   echo -e "🌐 Interfaz activa:    $IFACE"
   echo "──────────────────────────────────────────────────────"
 
